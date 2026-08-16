@@ -1,0 +1,78 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy dependency files
+COPY pyproject.toml uv.lock ./
+
+# Install uv using the official pre-built binaries (much faster than pip install uv)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# 1. Install dependencies ONLY (This creates a heavily cached layer)
+RUN uv sync --frozen --no-dev --no-install-project
+
+# 2. Copy the actual application code
+COPY todo/ ./todo/
+COPY main2.py ./
+
+# 3. Sync the project itself now that the code exists
+RUN uv sync --frozen --no-dev
+
+# Environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8000
+
+HEALTHCHECK CMD curl --fail http://localhost:8000/health || exit 1
+
+# Best Practice: Run using 'uv run', which automatically manages the path context
+CMD ["uv", "run", "uvicorn", "main2:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+
+
+#FROM python:3.13-slim
+#
+#WORKDIR /app
+#
+## Install system dependencies
+#RUN apt-get update && apt-get install -y --no-install-recommends \
+#    gcc \
+#    libpq-dev \
+#    && rm -rf /var/lib/apt/lists/*
+#
+## Copy dependency files
+#COPY pyproject.toml uv.lock ./
+#
+## Install uv
+#RUN pip install uv
+#
+## Sync dependencies (creates .venv)
+#RUN uv sync --frozen --no-dev
+#
+## Copy application code
+#COPY todo/ ./todo/
+#COPY main2.py ./
+#
+## Environment
+#ENV PATH="/app/.venv/bin:$PATH"
+#ENV PYTHONPATH=/app
+#ENV PYTHONDONTWRITEBYTECODE=1
+#ENV PYTHONUNBUFFERED=1
+#
+#EXPOSE 8000
+#
+#HEALTHCHECK CMD curl --fail http://localhost:8000/health || exit 1
+
+
+# Run with full path
+# CMD ["/app/.venv/bin/uvicorn", "main2:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+
+# OR Run the application
+# CMD ["uvicorn", "main2:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

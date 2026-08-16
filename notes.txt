@@ -1,0 +1,282 @@
+
+# Project structure for Day 10:
+
+# day8-secure-todo/                  ← Root
+# ├── main2.py
+# ├── Dockerfile
+# ├── docker-compose.yml             ← Here
+# ├── .dockerignore
+# ├── pyproject.toml
+# ├── .env
+# ├── todo/
+# │   ├── __init__.py
+# │   ├── main2.py (if you have it inside too)
+# │   ├── models.py
+# │   ├── schemas.py
+# │   ├── service.py
+# │   ├── auth.py
+# │   ├── database.py
+# │   ├── config.py
+# │   ├── dependencies.py
+# │   ├── exceptions.py
+# │   ├── logging_config.py
+# │   ├── rate_limiter.py
+# │   └── tests/
+# └── ...
+
+When you run:
+
+uvicorn main2:app --reload
+1. Uvicorn starts.
+2. It imports the module main2 (i.e. runs main2.py).
+3. It looks for the variable named app inside that module.
+4. Then it starts serving that app.
+
+To install package always use:
+uv add <package name> eg. uv add celery
+This will automatically update pyproject.toml and uv.lock and installs into project's virtual environment (.venv)
+To verify: uv run python -c "import celery; print(celery.__version__)"
+
+===========================================================
+
+FastAPI's BackgroundTask:
+
+Simple, no extra package needed. when to use: light work, same process
+eg. Log a message after creating a task
+
+For Production level, use Celery + Redis : heavy work, retries, scheduled jobs
+
+The process step-by-step:
+
+1. Request comes in (POST /tasks)
+2. FastAPI sees background_tasks: BackgroundTasks in the parameters
+3. FastAPI creates a BackgroundTasks object and injects it
+4. Your endpoint runs:
+      - creates the task
+      - registers work with background_tasks.add_task(...)
+5. FastAPI sends the response to the client
+6. After the response is sent, FastAPI runs the background tasks
+
+=================================================
+
+Celery is a powerful, distributed task queue for Python.
+Celery allows your FastAPI application to run time-consuming or background work outside the normal request-response cycle.
+
+Examples of what people use it for:
+
+Sending emails
+Processing uploaded files
+Generating reports
+Calling slow external APIs
+Scheduled jobs (like cron)
+
+How it works (high-level):
+
+FastAPI App  →  sends task  →  Redis / RabbitMQ (message broker)
+                                      ↓
+                               Celery Worker
+                                      ↓
+                               Executes the task in the background
+
+In our app:
+
+FastAPI app
+    │
+    │  celery_app.send_task(...)  or  task.delay(...)
+    ▼
+Redis (broker)  ← task queue
+    │
+    ▼
+Celery Worker process  ← separate process that runs the tasks
+    │
+    ▼
+Your function in todo/tasks.py
+
+Important difference from FastAPI BackgroundTasks:
+
+BackgroundTasks → same process as the API
+Celery → separate worker process (more reliable, scalable)
+
+Your API stays fast because it doesn’t wait for the heavy work to finish.
+Celery workers run as separate processes.
+
+====================================
+
+Celery needs Redis as the message broker.
+
+To run Redis:
+
+docker start redis
+# or    (if container does not exist) run
+docker run -d --name redis -p 6379:6379 redis:7-alpine
+
+Checking:
+docker exec -it redis redis-cli ping
+Should return PONG
+
+To start Celery worker: (in project root)
+uv run celery -A todo.celery_app.celery_app worker --loglevel=info
+
+When you start Celery:
+
+1. Celery loads todo.celery_app
+2. That file has include=["todo.tasks"]
+3. Celery imports todo.tasks
+4. It finds functions marked with @celery_app.task
+5. Those become registered tasks the worker can run
+
+Steps to run Celery for background tasks:
+
+Step 1: Start Redis - Redis is the queue/broker
+docker start redis
+
+Step 2: Start Celery worker (new terminal) - Worker executes tasks. It loads registered tasks and waits.
+Celery Worker is itself a Python process that loads your code. It does not depend on the FastAPI app being running.
+
+uv run celery -A todo.celery_app.celery_app worker --loglevel=info
+NOTE: If running from terminal, to stop, Press Ctrl + C
+
+Either:
+Step 3: Trigger the task once (test)
+uv run python -c "from todo.tasks import cleanup_expired_tokens; result = cleanup_expired_tokens.delay(); print('Task ID:', result.id)"
+
+OR:
+Step 4: Schedule task (via Beat)
+Beat only schedules; it does not execute heavy work. Beat reads beat_schedule and tracks due times.
+uv run celery -A todo.celery_app.celery_app beat --loglevel=info
+NOTE: If running from terminal, to stop, Press Ctrl + C
+
+Beat Scheduler:
+
+When the time arrives:
+Every hour Beat does roughly:
+Checks the schedule
+Sees cleanup-expired-tokens-hourly is due
+Sends a message to Redis:
+“run todo.cleanup_expired_tokens”
+Updates next run time
+
+Worker picks it up
+Worker reads the message from Redis
+Finds the function registered as todo.cleanup_expired_tokens
+Runs cleanup_expired_tokens()
+Deletes expired blacklist rows
+Marks task as SUCCESS (or FAILURE)
+
+Step-by-step:
+
+1. FastAPI calls cleanup_expired_tokens.delay()
+2. Celery serializes the task (name + arguments) as JSON
+3. Pushes it into Redis (the broker/queue)
+4. Returns a result object immediately (with task.id)
+5. Celery worker process pulls the job from Redis
+6. Worker executes cleanup_expired_tokens()
+
+Check frequency - Beat is a lightweight scheduler loop that looks at the schedule (about once per second)
+Task frequency - Your schedule value controls how often the task is actually enqueued (eg. 3600 = once per hour)
+
+Flow:
+
+1. Worker starts
+   → loads task code
+   → connects to Redis
+   → waits
+
+2. Beat starts
+   → reads schedule
+   → when due, pushes task message into Redis queue
+
+3. Worker
+   → pulls message from Redis
+   → executes the matching function
+   → marks success/failure
+
+
+# =================================
+
+Alembic
+
+uv run alembic history   # what migrations exist?
+uv run alembic current   # what does my DB think is applied?
+
+history  →  all known migrations in code
+current  →  what’s applied on the connected DB
+
+# Tell Alembic: this revision is already applied — do NOT run it again
+# basically adds the version (03dd29843910) back to alembic_version table
+uv run alembic stamp 03dd29843910
+
+# generates migration scripts from model
+# DB browser closed, API stopped preferred
+uv run alembic revision --autogenerate -m "add_task_user_id"
+
+# runs every revision that is not yet applied — in order — up to head
+uv run alembic upgrade head # Apply pending migrations in order
+
+uv run alembic current  # pointer in DB
+
+# =================================
+
+ARQ - (Async Redis Queue):
+
+ARQ is a modern, lightweight asynchronous task queue for Python, built specifically for asyncio.
+ARQ lets you run background jobs (heavy or slow work) outside of your normal FastAPI request cycle,
+while staying fully async.
+It is often considered a simpler and more FastAPI-friendly alternative to Celery.
+
+# add to pyproject.toml dependencies, then:
+uv add arq
+# or
+uv pip install arq && uv sync
+
+After setting arq (registering job functions etc.)
+
+Run jobs:
+
+# Terminal 1 — API
+PYTHONPATH=. uv run uvicorn main2:app --reload
+
+# Terminal 2 — worker
+PYTHONPATH=. uv run arq todo.jobs.WorkerSettings
+
+# 1. If Redis job queue (ARQ/Celery) and jobs matter -> Often fail startup or mark instance unhealthy
+# 2. If Redis is cache only -> Usually start without it and degrade (DB still works)
+# 3. IF Redis is session/rate-limit store and product requires it -> Fail or unhealthy
+
+Three patterns you’ll see:
+
+1. Fail fast on startup (what strict lifespan does)
+Redis down → create_pool fails → process exits → orchestrator restarts / doesn’t route traffic
+Good when: “this service is useless without Redis”
+Bad when: cache blip takes the whole API offline
+
+2. Start, but health fails
+App starts even if Redis is down
+/health (or /ready) returns 503 if Redis ping fails
+Load balancer / K8s stops sending traffic until Redis is back
+Very common in production: process is up, readiness depends on dependencies.
+
+3. Degrade gracefully
+Cache miss path → hit DB
+Enqueue fails → log + skip welcome (or write to fallback table)
+Common when Redis is optimization, not source of truth.
+
+How teams usually decide
+Ask: Can we serve the core API without Redis?
+
+Core feature,               Without Redis,      Policy
+CRUD tasks + JWT in DB,     Yes,                Soft-fail / degrade cache & jobs
+Queue-only worker API,      No,                 Fail startup is fine
+Rate limit only in Redis,   Partially,          Often degrade to in-memory or allow with warning
+
+# Best practice for queues pool / redis:
+
+# Production app
+  └── lifespan: try create_pool; on failure → redis_pool = None + log
+  └── register: if redis_pool: enqueue else: log skip
+  └── /health: optional Redis status
+
+Tests
+  └── conftest: mock create_pool / redis_pool (Option B)
+  └── no Redis required for unit/API tests
+  └── optional separate integration test with real Redis (CI service container)

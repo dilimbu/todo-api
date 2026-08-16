@@ -1,0 +1,57 @@
+# Define all the services (containers) that make up your application
+services:
+  # Service 1 - Main FastAPI application service
+  todo-api:
+    build: .                  # Build the image using the Dockerfile in the current directory (.)
+    ports:
+      - "8000:8000"           # Map host port 8000 to container port 8000
+    environment:
+      - SECRET_KEY=your-super-secret-key-change-this-in-production-2026
+      - DEBUG=true            # Enable debug mode (change to false in production)
+    volumes:
+      - .:/app                # Mount current directory to /app for hot reloading
+    restart: unless-stopped   # Auto-restart container if it crashes
+    depends_on:
+      - postgres              # Start postgres before starting this service
+
+  # Service 2 - PostgreSQL database service
+  postgres:
+    image: postgres:16-alpine   # Use official PostgreSQL image (lightweight alpine version)
+    environment:
+      POSTGRES_DB: todo_db
+      POSTGRES_USER: todo_user
+      POSTGRES_PASSWORD: todo_password
+    ports:
+      - "5432:5432"             # Expose PostgreSQL port
+    volumes:
+      - postgres_data:/var/lib/postgresql/data    # Persist database data
+
+# Define named volumes (persistent storage)
+volumes:
+  postgres_data:          # Named volume for PostgreSQL data
+
+# docker-compose.yml?
+# It is a configuration file for Docker Compose —
+# a tool that helps you define and run multi-container Docker applications.
+
+# Dockerfile = Instructions on how to build the image (how to build one container eg. your app)
+#docker-compose.yml = Instructions on how to run the services / multiple containers together
+# (including building them) (eg. todo app + database + Redis etc.)
+
+# Why we use it?
+#
+# Easy local development (one command to start everything)
+# Consistent environment (same as production)
+# Easy to manage multiple services
+# Good for testing with PostgreSQL, Redis, etc.
+
+# Examples of use:
+
+# Build and start all services
+#docker compose up --build
+#
+## Start in background
+#docker compose up -d
+#
+## Stop
+#docker compose down

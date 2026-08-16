@@ -1,0 +1,101 @@
+name: CI/CD Pipeline
+
+# Trigger the workflow on push to main/master and on pull requests
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test: # job 1 - Runs tests
+    # type of machine to run the job on, basically, GitHub will create a
+    # temporary Ubunty Linux virtual machine (runner) for your workflow
+    # after the job finishes, GitHub destroys the VM
+    runs-on: ubuntu-latest
+
+    # sequence of job tasks
+    steps:
+      - name: Checkout code
+        # checks out your code from GitHub repo to runner machine (specified above - ubuntu VM)
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-Python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install project dependencies
+        run: uv sync --frozen --no-dev
+
+      - name: Run tests
+        run: uv run pytest todo/tests -v --tb=short
+
+      - name: Run coverage report
+        run: uv run pytest todo/tests --cov=todo --cov-report=xml
+
+  docker-build: # job 2 - Builds Docker image (but doesn't push)
+    # Only run if tests above pass
+    needs: test
+    runs-on: ubuntu-latest  # runs on new Ubuntu VM
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3 # installs and configure docker in ubuntu VM
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5   # builds docker image
+        with:
+          context: .      # looks for Dockerfile in current directory (root)
+          push: false     # build image but do not push to Dokcer hub or registry
+          tags: todo-api:latest
+          # uses caching for faster builds
+          cache-from: type=gha    # docker layer caching, load from previous builds
+          cache-to: type=gha, mode=max  # save cache for future builds (max caching)
+
+      - name: Scan Docker image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'todo-api:latest'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+
+  deploy: # job 3 - Triggers "Render" to pull and deploy the latest code
+    needs: docker-build
+    if: github.ref == 'refs/heads/main'   # Only deploy on main branch
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Render
+        uses: johnbeynon/render-deploy-action@v0.0.8
+        with:
+          api-key: ${{ secrets.RENDER_API_KEY }}    # these secrets, needs to be added to GitHub
+          service-id: ${{ secrets.RENDER_SERVICE_ID }}
+
+# CI/CD workflow:
+
+# Runs automatically when:
+# you push code to main or master or create a pull request to main / master
+
+# To test it:
+# Commit and push the code to GitHub
+# Got to the repository -> Actions tab
+# You should see the workflow running
+
+# For larger teams, separate workflows:
+# ci.yml (test + build)
+# cd.yml (deployment)
+# For small/medium projects, one file is fine and common
+
+# deploy:
+# Render - is a full hosting platform that:
+# Builds the Docker image
+# Runs the container
+# Provides domain, scaling, logs, environment variables etc.
