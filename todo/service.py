@@ -3,6 +3,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from todo.cache import get_cache, set_cache, delete_pattern
+from todo.messaging.outbox import enqueue_task_created, enqueue_task_completed
 
 from todo.models import Task as TaskModel  # SqlAlchemy db model or ORM model
 from todo.schemas import TaskCreate, Task  # pydantic model (like POJO)
@@ -65,6 +66,8 @@ class TodoService:
             user_id=user_id  # NOTE: do not put user_id on TaskCreate, owner must come from JWT, not client
         )
         self.db.add(db_task)
+        self.db.flush()
+        enqueue_task_created(self.db, db_task, user_id)  # enqueue to kafka topic
         self.db.commit()
         self.db.refresh(db_task)
 
@@ -83,6 +86,7 @@ class TodoService:
         task = self.db.query(TaskModel).where(TaskModel.id == task_id, TaskModel.user_id == user_id).first()
         if task:
             task.done = True
+            enqueue_task_completed(self.db, task, user_id)
             self.db.commit()
             self.db.refresh(task)
 
@@ -108,3 +112,27 @@ class TodoService:
         logger.info("Cache cleared for user_id=%s after delete", user_id)
 
         return True
+
+    # service helpers
+    def stats(self, user_id: int) -> dict:
+        total = self.db.query(TaskModel).where(TaskModel.user_id == user_id).count()
+        pending = (
+            self.db.query(TaskModel)
+            .where(TaskModel.user_id == user_id,
+                   TaskModel.done.is_(False)
+                   ).count()
+        )
+        return {
+            "total": total,
+            "pending": pending,
+            "done": total - pending
+        }
+
+    def recent(self, user_id: int, limit: int = 5) -> list:
+        return (
+            self.db.query(TaskModel)
+            .where(TaskModel.user_id == user_id)
+            .order_by(TaskModel.created_at.desc())
+            .limit(limit)
+            .all()
+        )

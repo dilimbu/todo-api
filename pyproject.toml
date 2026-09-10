@@ -1,5 +1,5 @@
 [project]
-name = "secure-todo-api"
+name = "todo-api"
 version = "0.1.0"
 description = "Secure Todo API with FastAPI + SQLAlchemy"
 requires-python = ">=3.11"
@@ -12,7 +12,6 @@ dependencies = [
     "alembic>=1.12.0",
     "python-jose[cryptography]>=3.3.0",
     "argon2-cffi>=23.1.0", # Modern, secure password hashing (replaces passlib+bcrypt)
-    #    "passlib[bcrypt]>=1.7.4",
     "python-multipart>=0.0.6",
     "slowapi>=0.1.0", # for rate limiting
     "pytest>=8.0.0", # pytest dependences
@@ -26,6 +25,8 @@ dependencies = [
     "celery>=5.6.3", # for background tasks
     "celery-types>=0.26.0",
     "arq>=0.28.0", # async redis queue, # Python 3.14 + get_event_loop fix
+    "aiokafka>=0.14.0",
+    "psycopg2-binary>=2.9.0"    # PostgreSQL driver
 ]
 
 # Package,Purpose
@@ -36,28 +37,3 @@ dependencies = [
 #python-jose[cryptography],JWT token handling (for authentication)
 #passlib[bcrypt],Secure password hashing
 #python-multipart,Required for handling file uploads & form data
-
-
-# NOTE: everytime you uupdate pyproject.toml, sync the environment:
-# recommended command to update environment + lockfile:
-# uv sync
-
-# To run Coverage:
-# uv run pytest todo/tests --cov=todo --cov-report=term-missing -v
-
-# To install dependency (that adds to this file pyproject.toml) use this command:
-# eg. adding redis dependency
-# uv add redis
-
-# NOTE: we are going to add redis server via docker
-# eg. docker run -d --name redis -p 6379:6379 redis:7-alpine
-
-# useful command later:
-# Stop Redis
-#docker stop redis
-
-# Start again
-#docker start redis
-
-# Remove completely
-#docker rm -f redis

@@ -1,5 +1,5 @@
 import logging
-from arq import cron
+
 from arq.connections import RedisSettings
 
 from todo.config import settings

@@ -1,10 +1,11 @@
 """
 Test file for Authentication endpoints (Registration & Login)
 """
+from todo.models import OutboxEvent
 
 """
 To run tests:
-From the project root (day8-secure-todo/):
+From the project root (todo-api/):
 -v = verbose, shows more detailed output for each test
 
 uv run pytest todo/tests/ -v
@@ -85,60 +86,80 @@ def test_protected_endpoint_without_token(client: TestClient):
     assert response.status_code == 401
 
 
-# ====================== Testing jobs ======================
-
-from unittest.mock import AsyncMock, MagicMock
-from pytest_mock import MockerFixture
-
-
-def test_register_enqueues_welcome_job(client: TestClient, mock_arq_create_pool) -> None:
-    """Register should enqueue ARQ job welcome_user with the username."""
-
-    # We fake Redis queue in conftest -> mock_arq_create_pool, so not needed below:
-
-    # # fake Redis/ARQ pool object
-    # mock_pool = MagicMock()
-    # # fake async method so await enqueue_job(..) works and we can use assert_awaited_once_with
-    # mock_pool.enqueue_job = AsyncMock()  # attach enqueue_job attribute
-    #
-    # # Patch the pool used by main2. Replaces main2.redis_pool with mock_pool for this test only
-    # # Path must match where the name is looked up: from main2 import redis_pool / main2.redis_pool
-    # # in the register handler. After the test, pytest-mock undoes the patch
-    #
-    # mocker.patch("main2.redis_pool", mock_pool)
-
-    # Real HTTP call through app and hit's the register route (DB is the test DB from conftest)
+def test_register_writes_user_registered_outbox(client, test_db) -> None:
+    """Register persists user.registered in the same transaction."""
     response = client.post(
         "/register",
         json={
             "username": "queueuser1",
             "email": "queue1@example.com",
-            "password": "password123"
+            "password": "password123",
         }
     )
-
     assert response.status_code == 201
-    # test enqueue_job was awaited exactly once, if register never enqueues or uses
-    # another name / tags, this fails
-    mock_arq_create_pool.enqueue_job.assert_awaited_once_with("welcome_user", "queueuser1")
 
-    # NOTE: This test only proves: register tried to enqueue the right job with the right username.
-    # It does not prove Redis is running, if worker processed the job or the welcome_user function
-    # exists on the worker, Those need integration tests
+    test_db.expire_all()    # drop cached state (in the session)
+    row = (
+        test_db.query(OutboxEvent)
+        .filter_by(event_type="user.registered")
+        .one()                  # need only one user registered: fails if 0 or > 1 rows
+    )
+    assert row.status == "pending"
+    assert row.payload.get("username") == "queueuser1"
 
-    # Flow:
-    # pytest
-    #   → builds client (test DB)
-    #   → builds mocker
-    #   → runs test
-    #        patch redis_pool → mock
-    #        POST /register
-    # redis_pool is mock_pool → calls mock_pool.enqueue_job(...)
-    #        assert 201
-    #        assert mock got enqueue_job("welcome_user", "queueuser1")
+# ====================== Testing jobs ======================
 
-    # To run just this test:
-    # PYTHONPATH=. uv run pytest todo/tests/test_auth.py::test_register_enqueues_welcome_job -v
+# from unittest.mock import AsyncMock, MagicMock
+# from pytest_mock import MockerFixture
+
+# def test_register_enqueues_welcome_job(client: TestClient, mock_arq_create_pool) -> None:
+#     """Register should enqueue ARQ job welcome_user with the username."""
+#
+#     # We fake Redis queue in conftest -> mock_arq_create_pool, so not needed below:
+#
+#     # # fake Redis/ARQ pool object
+#     # mock_pool = MagicMock()
+#     # # fake async method so await enqueue_job(..) works and we can use assert_awaited_once_with
+#     # mock_pool.enqueue_job = AsyncMock()  # attach enqueue_job attribute
+#     #
+#     # # Patch the pool used by main. Replaces main.redis_pool with mock_pool for this test only
+#     # # Path must match where the name is looked up: from main import redis_pool / main.redis_pool
+#     # # in the register handler. After the test, pytest-mock undoes the patch
+#     #
+#     # mocker.patch("main.redis_pool", mock_pool)
+#
+#     # Real HTTP call through app and hit's the register route (DB is the test DB from conftest)
+#     response = client.post(
+#         "/register",
+#         json={
+#             "username": "queueuser1",
+#             "email": "queue1@example.com",
+#             "password": "password123"
+#         }
+#     )
+#
+#     assert response.status_code == 201
+#     # test enqueue_job was awaited exactly once, if register never enqueues or uses
+#     # another name / tags, this fails
+#     mock_arq_create_pool.enqueue_job.assert_awaited_once_with("welcome_user", "queueuser1")
+
+# NOTE: This test only proves: register tried to enqueue the right job with the right username.
+# It does not prove Redis is running, if worker processed the job or the welcome_user function
+# exists on the worker, Those need integration tests
+
+# Flow:
+# pytest
+#   → builds client (test DB)
+#   → builds mocker
+#   → runs test
+#        patch redis_pool → mock
+#        POST /register
+# redis_pool is mock_pool → calls mock_pool.enqueue_job(...)
+#        assert 201
+#        assert mock got enqueue_job("welcome_user", "queueuser1")
+
+# To run just this test:
+# PYTHONPATH=. uv run pytest todo/tests/test_auth.py::test_register_enqueues_welcome_job -v
 
 # ==============================================================
 # Test Coverage Report:
@@ -172,10 +193,9 @@ def test_register_enqueues_welcome_job(client: TestClient, mock_arq_create_pool)
 # Name                         Stmts   Miss  Cover   Missing
 # ----------------------------------------------------------
 # todo/__init__.py                 0      0   100%
-# todo/auth2.py                   45      5    89%   32-33, 77-79
+# todo/auth_sevice.py                   45      5    89%   32-33, 77-79
 # todo/auth.py                    37     37     0%   37-144
 # todo/config.py                   8      0   100%
-# todo/crud.py                    25     25     0%   1-40
 # todo/database.py                13      4    69%   33-37
 # todo/dependencies.py            11      2    82%   37-38
 # todo/exceptions.py              15      4    73%   14-15, 33-34

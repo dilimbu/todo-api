@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, JSON, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -48,54 +48,34 @@ class TokenBlacklist(Base):
     created_at = Column(DateTime,
                         default=lambda: datetime.now(timezone.utc))  # in prod - server_default=func.now() is better
 
-# CREATE TABLE IF NOT EXISTS tasks (
-# 	id INTEGER PRIMARY KEY AUTOINCREMENT,
-# 	title TEXT NOT NULL,
-# 	done BOOLEAN DEFAULT 0,
-# 	created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-# );
+
+class OutboxEvent(Base):
+    __tablename__ = "outbox"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(String(36), unique=True, nullable=False, index=True)  # UUID str
+    event_type = Column(String(64), nullable=False, index=True)  # e.g. user.registered, task.created
+    aggregate_type = Column(String(32), nullable=False)  # user | task
+    aggregate_id = Column(String(64), nullable=False, index=True)
+    topic = Column(String(128), nullable=False)
+    payload = Column(JSON, nullable=False)
+    status = Column(
+        String(16),
+        nullable=False,
+        default="pending",  # used when create objects in Python
+        server_default="pending",  # used by database if a row is inserted without status
+        index=True)  # pending|published|failed
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    published_at = Column(DateTime(timezone=True), nullable=True)
 
 
-# -- Create the table
-# CREATE TABLE IF NOT EXISTS users (
-#     id INTEGER PRIMARY KEY AUTOINCREMENT,
-#     username TEXT UNIQUE NOT NULL,
-#     hashed_password TEXT NOT NULL,
-#     email TEXT UNIQUE,
-#     is_active INTEGER DEFAULT 1,
-#     created_at TEXT DEFAULT CURRENT_TIMESTAMP
-# );
-#
-# -- Create indexes (recommended)
-# CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
-# CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
+class ProcessedEvent(Base):
+    """Inbox: event_id already applied by a consumer. Idempotency store."""
+    __tablename__ = "processed_events"
 
-# What is Alembic:
-#
-# Alembic is a database migration tool for SQLAlchemy.
-#
-# You define your models in models.py (using SQLAlchemy)
-# You run:Bashalembic revision --autogenerate -m "add token_blacklist"
-# Alembic compares your models with the current database
-# It automatically generates a migration script (Python file)
-# You run:Bashalembic upgrade head
-# Alembic applies the changes → creates/alters tables
-# Alembic knows your database through the alembic.ini file and the env.py file.
-
-# First install alembic, (make sure it's in pyproject.toml file, and uv sync)
-# Then, initialize it:
-# uv run alembic init alembic
-# This will create:
-#
-# alembic.ini
-# alembic/ folder
-
-# Then update alembic.ini with your db:
-# sqlalchemy.url = sqlite:///./tasks.db
-
-# and also: alembic/env.py to add database and models (make sure all models are imported)
-
-
-# Run in terminal:
-# uv run alembic revision --autogenerate -m "add token_blacklist table"
-# uv run alembic upgrade head
+    event_id = Column(String(36), primary_key=True)
+    event_type = Column(String(100), nullable=False)
+    topic = Column(String(200), nullable=False)
+    processed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

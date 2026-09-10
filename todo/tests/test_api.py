@@ -1,6 +1,7 @@
 """
 Integration tests for Task endpoints (protected)
 """
+from unittest.mock import AsyncMock
 
 # To run tests:
 # PYTHONPATH=. uv run pytest todo/tests -v --tb=short
@@ -124,3 +125,50 @@ def test_expired_token_scenario(client: TestClient, registered_user):
     """Simulate expired token behavior (in real app you would set short expiry)"""
     # This is more of a manual test in real life
     pass
+
+# ==================== Dashboard ===================================
+def test_dashboard_success(client, auth_token, mock_arq_create_pool):
+    """
+    GET /dashboard should return stats, recent_tasks, and redis_available.
+    Uses gather under the hood; we only assert the HTTP contract.
+    """
+    # seed a couple of tasks so stats/recent are non-empty
+    headers = {"Authorization": f"Bearer {auth_token}"}
+    client.post("/tasks", json={"title": "Dash task 1"}, headers=headers)
+    client.post("/tasks", json={"title": "Dash task 2"}, headers=headers)
+
+    # make ping succeed (ARQ pool is already mocked in conftest)
+    mock_arq_create_pool.ping = AsyncMock(return_value=True)
+
+    response = client.get("/dashboard", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "stats" in body
+    assert body["stats"]["total"] >= 2
+    assert body["stats"]["pending"] >= 2
+    assert "done" in body["stats"]
+
+    assert "recent_tasks" in body
+    assert isinstance(body["recent_tasks"], list)
+    assert len(body["recent_tasks"]) >= 1
+
+    assert body["redis_available"] is True
+
+
+def test_dashboard_requires_auth(client):
+    """Dashboard is protected — no token → 401."""
+    response = client.get("/dashboard")
+    assert response.status_code in (401, 403)
+
+
+def test_dashboard_redis_down(client, auth_token, mock_arq_create_pool):
+    """When Redis ping fails, redis_available should be False (API still 200)."""
+    mock_arq_create_pool.ping = AsyncMock(side_effect=ConnectionError("down"))
+
+    headers = {"Authorization": f"Bearer {auth_token}"}
+    response = client.get("/dashboard", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["redis_available"] is False

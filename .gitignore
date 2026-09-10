@@ -1,0 +1,36 @@
+# Secrets and local env
+.env
+.env.local
+*.pem
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Tests / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Local DBs and job state
+*.db
+*.sqlite
+celerybeat-schedule
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Scratch
+notes.txt
+threading_test.py
+*.sqbpro

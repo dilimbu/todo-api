@@ -12,7 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient  # simulates HTTP requests to FastAPI without running real server
 
-from main2 import app
+from main import app
 from todo.database import Base, get_db
 
 # Test database setup
@@ -57,15 +57,9 @@ def client(test_db):
     app.dependency_overrides.clear()  # clear override
 
 
-# Fixture: Creates fresh tables before each test
-# Provides a database session to the test
-# Cleans everything up after the test finishes
-# It overrides your normal get_db() dependency with the test database.
-# Gives you a TestClient you can use to make real-looking API calls in tests.
-
-# What is a fixture in pytest?
-# A fixture is a reusable piece of setup/teardown code that pytest runs automatically before (and after) your tests.
-# Think of it as "test preparation code" that can be shared across multiple tests.
+# Fixture: Creates fresh tables before each test and provides a database session to the test
+# overrides your normal get_db() dependency with the test database
+# and cleans everything up after the test finishes
 
 # ====================== User Fixtures ======================
 @pytest.fixture(scope="function")
@@ -124,8 +118,9 @@ def mock_arq_create_pool(mocker):
     async def fake_create_pool(*args, **kwargs):
         return mock_pool
 
-    # Patch where main2 looks up the name
-    mocker.patch("main2.create_pool", side_effect=fake_create_pool)
-    mocker.patch("main2.redis_pool", mock_pool)
+    # Patch where main looks up the name
+    mocker.patch("main.create_pool", side_effect=fake_create_pool)
+    # Pool used by auth enqueue + ping_redis
+    mocker.patch("todo.redis_utils.redis_pool", mock_pool)
 
     return mock_pool

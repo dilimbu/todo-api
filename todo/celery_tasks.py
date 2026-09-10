@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from todo.celery_app import celery_app
 
 # get logger
-logger = logging.getLogger(__name__)  # __name__ gets name of current module. eg. in tasks.py
+logger = logging.getLogger(__name__)  # __name__ gets name of current module. eg. in celery_tasks.py
 
 
 def write_audit_log(username: str, action: str) -> None:

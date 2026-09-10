@@ -1,24 +1,24 @@
 # standard database setup code for FastAPI + SQLAlchemy
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
 from pathlib import Path
 
-# ====================== Database Configuration ======================
-# Tells SQLAlchemy where the database is.
-# SQLite database file will be created in the project root
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 
-BASE_DIR = Path(__file__).resolve().parent.parent # project root
-DATABASE_URL = f"sqlite:///{BASE_DIR}/tasks.db"
+from todo.config import settings
+
+# ====================== Database Configuration ======================
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent  # project root
+
+DATABASE_URL = settings.DATABASE_URL
 
 # Create the database engine, the core connection to the db
-# connect_args is required for SQLite when using with FastAPI
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False})  # Required for SQLite with FastAPI
-# SQLLite by default allows only one thread to access the database at a time
-# setting it to "false" allows multiple threads to use the same database connection
-# FastAPI uses multiple threads (via UVIcorn workers) to handle concurrent requests
+    pool_pre_ping=True
+)
 
 # SessionLocal creates new database sessions when called
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -28,13 +28,15 @@ Base = declarative_base()
 
 
 # Dependency function for FastAPI
-# This creates a new database session for each request and closes it after use
 def get_db():
+    """FastAPI dependency: one session per request, always closed."""
     db = SessionLocal()
     try:
         yield db  # Give session to the endpoint (session is available during the request)
     finally:  # automatically close after the request is done
         db.close()  # Always close the session after the request
+
+# ============================
 
 # Why this pattern?
 #
@@ -53,7 +55,3 @@ def get_db():
 # Pass the db to your endpoint function.
 # Keep the session open during the entire request.
 # Close the session after the request is finished (in the finally block).
-
-
-# ============================
-

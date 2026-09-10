@@ -1,57 +1,100 @@
 # Define all the services (containers) that make up your application
+
+# anchor for reuse (named blob)
+x-app-env: &app-env
+  env_file: .env
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  environment:
+    # overrides from .env
+    DATABASE_URL: postgresql+psycopg2://todo_user:todo_password@host.docker.internal:5432/todo_db
+    REDIS_HOST: host.docker.internal
+    KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+
 services:
-  # Service 1 - Main FastAPI application service
+  # Main FastAPI application service
   todo-api:
+    <<: *app-env            # insert values from app-env
     build: .                  # Build the image using the Dockerfile in the current directory (.)
+    container_name: todo-api
     ports:
       - "8000:8000"           # Map host port 8000 to container port 8000
-    environment:
-      - SECRET_KEY=your-super-secret-key-change-this-in-production-2026
-      - DEBUG=true            # Enable debug mode (change to false in production)
-    volumes:
-      - .:/app                # Mount current directory to /app for hot reloading
     restart: unless-stopped   # Auto-restart container if it crashes
-    depends_on:
-      - postgres              # Start postgres before starting this service
 
-  # Service 2 - PostgreSQL database service
-  postgres:
-    image: postgres:16-alpine   # Use official PostgreSQL image (lightweight alpine version)
-    environment:
-      POSTGRES_DB: todo_db
-      POSTGRES_USER: todo_user
-      POSTGRES_PASSWORD: todo_password
+  # Kafka
+  kafka:
+    image: apache/kafka:4.3.1
+    container_name: todo-kafka
     ports:
-      - "5432:5432"             # Expose PostgreSQL port
-    volumes:
-      - postgres_data:/var/lib/postgresql/data    # Persist database data
+      - "9092:9092"
+    environment:
+      # Unique id for this node (must match quorum voters)
+      KAFKA_NODE_ID: 1
+      # Combined broker + controller (OK for local; often split in prod)
+      KAFKA_PROCESS_ROLES: broker,controller
 
-# Define named volumes (persistent storage)
-volumes:
-  postgres_data:          # Named volume for PostgreSQL data
+      # Bind inside container: clients on 9092, controller on 9093, NAME://host:port, Plaintext: (no TLS)
+      # KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
 
-# docker-compose.yml?
-# It is a configuration file for Docker Compose —
-# a tool that helps you define and run multi-container Docker applications.
+      # What host apps should use after connect
+      # KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
 
-# Dockerfile = Instructions on how to build the image (how to build one container eg. your app)
-#docker-compose.yml = Instructions on how to run the services / multiple containers together
-# (including building them) (eg. todo app + database + Redis etc.)
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
 
-# Why we use it?
-#
-# Easy local development (one command to start everything)
-# Consistent environment (same as production)
-# Easy to manage multiple services
-# Good for testing with PostgreSQL, Redis, etc.
+      # Must match NODE_ID
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093 # nodeId@host:port
 
-# Examples of use:
+      # Single-broker local settings
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true" # if topic that producer writes to does not exist, Kafka creates it
+    healthcheck: # check container is healthy
+      test: [ "CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1" ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
-# Build and start all services
-#docker compose up --build
-#
-## Start in background
-#docker compose up -d
-#
-## Stop
-#docker compose down
+  kafka-ui: # browser UI to inspect clusters, topics and messages
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=local
+      # From another container use service name, not localhostw
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:29092 # How UI container reaches Kafka
+    depends_on:
+      - kafka
+
+  outbox-publisher:
+    <<: *app-env
+    build: .
+    container_name: todo-outbox-publisher
+    command: [ "python", "-m", "workers.outbox_publisher" ]
+    healthcheck:
+      test: ["NONE"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  event-consumer:
+    <<: *app-env
+    build: .
+    container_name: todo-event-consumer
+    command: [ "python", "-m", "workers.event_consumer" ]
+    healthcheck:
+      test: ["NONE"]
+    depends_on:
+      kafka:
+        condition: service_started
+    restart: unless-stopped
+
+  # postgresql db will be connected via local:
+

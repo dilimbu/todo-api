@@ -3,16 +3,14 @@ Reusable FastAPI dependencies for authentication and other common logic.
 Keep this file lightweight.
 """
 
-# Note, keep dependencies.py minimal and fast, hence don't add logger here
-# it would be unnecessary overhead in most cases since this would be called on almost every request
-
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
-from todo.auth2 import verify_token
+from todo.auth_sevice import verify_token
 from todo.database import get_db
 from todo.models import User as UserModel, TokenBlacklist
+from todo.service import TodoService
 
 # using OAuth2Password flow for authentication.
 # tokenUrl specifies login endpoint eg. "/login" for swagger UI
@@ -20,9 +18,8 @@ from todo.models import User as UserModel, TokenBlacklist
 oauth2_shema = OAuth2PasswordBearer(tokenUrl="/login", auto_error=False)
 
 
-# when FastAPI sees this: token: str = Depends(oauth2_shema),
-# it looks for Authorization: Bearer <token> header in request
-# extracts the token and passes it to function
+# Depends(oauth2_shema) = FastAPI looks for Authorization Bearer <token> header
+# in request and extracts the token and passes it to function
 def get_current_user(
         token: str = Depends(oauth2_shema),
         db: Session = Depends(get_db)) -> UserModel:
@@ -31,7 +28,6 @@ def get_current_user(
     Raises 401 if token is missing or invalid. Return full User object from DB.
     Used in all protected endpoints.
     """
-    # print(f"DEBUG Token received: {token}")  # DEBUG
 
     if not token:
         raise HTTPException(
@@ -76,3 +72,8 @@ def get_current_admin_user(current_user: str = Depends(get_current_user)):
             "Admin access required"
         )
     return current_user
+
+
+def get_todo_service(db: Session = Depends(get_db)) -> TodoService:
+    """Dependency to get TodoService with DB session"""
+    return TodoService(db)

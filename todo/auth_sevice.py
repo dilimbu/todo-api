@@ -1,7 +1,6 @@
-# uses settings / config file to pull config values eg. secret key, token expiry etc.
 import logging
 from datetime import datetime, timedelta, timezone
-from http.client import HTTPException
+
 from typing import Optional
 
 from argon2 import PasswordHasher
@@ -15,17 +14,12 @@ from todo.config import settings
 from todo.models import User, TokenBlacklist
 from todo.schemas import UserCreate
 
+from todo.messaging.outbox import enqueue_user_registered
+
 ph = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=4)
 
 # get logger
-logger = logging.getLogger(__name__)  # __name__ gets name of current module. eg. in auth.py -> __name__ = "todo.auth"
-
-
-# FAKE_USER = {
-#     "id": 1,
-#     "username": "dipen",
-#     "hashed_password": "$argon2id$v=19$m=65536,t=3,p=4$r+VhnKISh2iR5FC5pr16pA$UeKicZSOqW8v5tb4t8dOUT0xAles5Bq+ciPaTDSeIQI"
-# }
+logger = logging.getLogger(__name__)
 
 
 def hash_password(password: str) -> str:
@@ -79,6 +73,10 @@ def create_user(db: Session, user_data: UserCreate) -> User:
     )
     try:
         db.add(db_user)
+        db.flush() # INSERT runs now, but still uncommitted, so we can get user.id before commit if needed
+
+        enqueue_user_registered(db, db_user) # wire here for kafka. must run before db.commit(), the same session
+
         db.commit()
         db.refresh(db_user)
         return db_user
@@ -100,11 +98,6 @@ def create_user(db: Session, user_data: UserCreate) -> User:
 
 def verify_token(token: str):
     """Decode JWT and return username"""
-
-    # DEBUG
-    # print(f"DEBUG SECRET_KEY", {settings.SECRET_KEY})
-    # print(f"DEBUG ALGORITHM: {settings.ALGORITHM}")
-
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -112,16 +105,14 @@ def verify_token(token: str):
     )
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        print(f"DEBUG Payload: {payload}")  # DEBUG
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
     except JWTError as e:
-        print(f"DEBUG JWTError: {e}")
         raise credentials_exception
 
     # We do not need to verify username is equal, We are trusting the signature of the JWT
-    # (thanks to SECRET_KEY). If the token is valid, the username inside it is considered authentic.
+    # If the token is valid, the username inside it is considered authentic.
     # Doing an extra DB lookup on every request would be expensive (performance hit).
 
     return username

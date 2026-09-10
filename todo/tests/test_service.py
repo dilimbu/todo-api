@@ -10,6 +10,8 @@ import pytest
 from todo.schemas import TaskCreate
 from todo.service import TodoService
 
+from todo.models import Task as TaskModel, OutboxEvent
+
 """
 MagicMock = mocks database - fakes database and tables, 
 does not know about actual db schema, but it allows to accept 
@@ -130,13 +132,17 @@ def test_get_all_including_done(service, mock_db):
 
 # ====================== create() Tests ======================
 def test_create_task(service, mock_db):
-    """Test task creation"""
+    """Task + outbox row in the same transaction."""
     task_data = TaskCreate(title="Write unit tests")
 
     created_task = service.create(2, task_data)
 
     assert created_task.title == "Write unit tests"
-    mock_db.add.assert_called_once()
+    assert mock_db.add.call_count == 2
+    added = [c.args[0] for c in mock_db.add.call_args_list]
+    assert any(isinstance(obj, TaskModel) for obj in added)
+    assert any(isinstance(obj, OutboxEvent) for obj in added)
+
     mock_db.commit.assert_called_once()
     mock_db.refresh.assert_called_once()
 
@@ -195,3 +201,34 @@ def test_delete_not_found(service, mock_db):
     assert result is False
     mock_db.query.return_value.where.assert_called_once()
     # Full equality on SQLAlchemy expressions is awkward; calling once is usually enough.
+
+
+# ===============
+def test_stats_counts(service, mock_db):
+    """stats() returns total / pending / done for the user."""
+    # count() is called twice (total, then pending)
+    mock_db.query.return_value.where.return_value.count.side_effect = [5, 2]
+
+    result = service.stats(user_id=1)
+
+    assert result == {"total": 5, "pending": 2, "done": 3}
+    assert mock_db.query.call_count >= 1
+
+
+def test_recent_limits_and_orders(service, mock_db):
+    """recent() applies where + order_by + limit."""
+    mock_task = MagicMock()
+    mock_query = MagicMock()
+    mock_db.query.return_value = mock_query
+    mock_query.where.return_value = mock_query
+    mock_query.order_by.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_query.all.return_value = [mock_task]
+
+    rows = service.recent(user_id=1, limit=5)
+
+    assert rows == [mock_task]
+    mock_query.where.assert_called_once()
+    mock_query.order_by.assert_called_once()
+    mock_query.limit.assert_called_once_with(5)
+    mock_query.all.assert_called_once()
