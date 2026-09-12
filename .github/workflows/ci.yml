@@ -56,6 +56,7 @@ jobs:
         with:
           context: .      # looks for Dockerfile in current directory (root)
           push: false     # build image but do not push to Docker hub or registry
+          load: true
           tags: todo-api:latest
           # uses caching for faster builds
           cache-from: type=gha    # docker layer caching, load from previous builds
