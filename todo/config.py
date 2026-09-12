@@ -18,41 +18,27 @@ class Settings(BaseSettings):
     REDIS_EXPIRE_SECONDS: int = 60  # TTL
 
     # Kafka
-    KAFKA_BOOTSTRAP_SERVERS: str
-    KAFKA_ENABLED: bool = True
-    KAFKA_TOPIC_USERS: str
-    KAFKA_TOPIC_TASKS: str
-    KAFKA_CONSUMER_GROUP: str
+    KAFKA_ENABLED: bool = False
+    KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
+    KAFKA_TOPIC_USERS: str = "todo.users"
+    KAFKA_TOPIC_TASKS: str = "todo.tasks"
+    KAFKA_CONSUMER_GROUP: str = "todo-api"
 
     # kafka publisher (outbox → broker)
-    OUTBOX_BATCH_SIZE: int
-    OUTBOX_POLL_SECONDS: float
-    OUTBOX_MAX_ATTEMPTS: int
+    OUTBOX_BATCH_SIZE: int = 100
+    OUTBOX_POLL_SECONDS: float = 2.0
+    OUTBOX_MAX_ATTEMPTS: int = 5
 
     # kafka consumer (broker → handlers)
-    KAFKA_COMMIT_EVERY: int
-    KAFKA_COMMIT_INTERVAL_SEC: float
+    KAFKA_COMMIT_EVERY: int = 10
+    KAFKA_COMMIT_INTERVAL_SEC: float = 5.0
 
     model_config = SettingsConfigDict(
-        # __file__ = gives path of current file (like, Where am I?)
-        # __file__ → points to todo/config.py, .parent → goes up one level → todo/ folder
-        # .parent again → goes up one more level → todo-api/ (root folder)
-        # / ".env" → adds the .env file name
-        # .parent.parent = go up two levels from the current file.
-
-        # alternative way: Option 1: From root (most common)
-        # env_file="../.env"
-        # .parent.parent method is more robust because it works even if you move folders around.
-
+        # __file__ = path of current file, .parent.parent = go up two levels from the current file.
         env_file=Path(__file__).parent.parent / ".env",  # Adjust if .env location changes
         env_file_encoding="utf-8",
         extra="ignore"  # ignores extra env variables
     )
 
-
-# THIS is old way, use model_config:
-# class Config:
-#     env_file = "../.env"
-#     env_file_encoding = "utf-8"
 
 settings = Settings()
