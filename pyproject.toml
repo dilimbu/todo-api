@@ -14,11 +14,7 @@ dependencies = [
     "argon2-cffi>=23.1.0", # Modern, secure password hashing (replaces passlib+bcrypt)
     "python-multipart>=0.0.6",
     "slowapi>=0.1.0", # for rate limiting
-    "pytest>=8.0.0", # pytest dependences
-    "pytest-asyncio>=0.23.0",
-    "httpx>=0.25.0", # for testing FastAPI
-    "pytest-mock>=3.12.0",
-    "pytest-cov>=5.0.0", # Test Coverage Report
+
     "aiofiles>=25.1.0",
     "requests>=2.34.2",
     "redis[hiredis]>=4.2.0,<6", # ARQ requires redis<6 (client, not server)
@@ -27,6 +23,15 @@ dependencies = [
     "arq>=0.28.0", # async redis queue, # Python 3.14 + get_event_loop fix
     "aiokafka>=0.14.0",
     "psycopg2-binary>=2.9.0"    # PostgreSQL driver
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0", # pytest dependences
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.25.0", # for testing FastAPI
+    "pytest-mock>=3.12.0",
+    "pytest-cov>=5.0.0", # Test Coverage Report
 ]
 
 # Package,Purpose
